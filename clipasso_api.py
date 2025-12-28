@@ -20,11 +20,22 @@ import sys
 import subprocess as sp
 import multiprocessing as mp
 import time
+import tempfile
 from shutil import copyfile
+from pathlib import Path
+from datetime import datetime
 import numpy as np
 import torch
 import argparse
 import warnings
+
+# 导入文生图相关库
+try:
+    from diffusers import StableDiffusionPipeline
+    DIFFUSERS_AVAILABLE = True
+except ImportError:
+    DIFFUSERS_AVAILABLE = False
+    print("Warning: diffusers not available. text_to_image function will not work.")
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -298,17 +309,122 @@ def generate_sketch(target_file, num_strokes=16, num_iter=2001, fix_scale=0,
 
     return result
 
-# Example usage
-if __name__ == "__main__":
-    # Example: Generate sketch for an image
-    result = generate_sketch(
-        target_file="path/to/your/image.jpg",
-        num_strokes=16,
-        num_iter=1000,  # Shorter for testing
-        num_sketches=2
-    )
+def text_to_image(prompt, negative_prompt="", output_dir="./generated_images",
+                 filename=None, num_strokes=16, num_iter=2001,
+                 fix_scale=0, mask_object=0, num_sketches=3, use_gpu=None,
+                 clipasso_path=None, multiprocess=True):
+    """
+    文生图函数：先用Stable Diffusion生成图像，再用CLIPasso生成素描
 
-    if result["success"]:
-        print(f"Sketch generated successfully! Best sketch: {result['best_sketch_path']}")
-    else:
-        print(f"Error: {result.get('error', 'Unknown error')}")
+    Args:
+        prompt (str): 正向提示词
+        negative_prompt (str): 负向提示词
+        output_dir (str): 输出目录
+        filename (str): 输出文件名（不含扩展名）
+        num_strokes, num_iter, fix_scale, mask_object, num_sketches: CLIPasso参数
+        use_gpu (bool): 是否使用GPU
+        clipasso_path (str): CLIPasso路径
+        multiprocess (bool): 是否多进程
+
+    Returns:
+        dict: 包含生成结果的字典
+    """
+
+    # 检查diffusers是否可用
+    if not DIFFUSERS_AVAILABLE:
+        return {
+            "success": False,
+            "error": "diffusers库不可用，请安装: pip install diffusers torch"
+        }
+    
+    # 创建输出目录
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # 第一步：用Stable Diffusion生成基础图像
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"第一步 - 使用 {device} 生成基础图像...")
+    
+    # 加载Stable Diffusion模型
+    sd_pipe = StableDiffusionPipeline.from_pretrained(
+        "runwayml/stable-diffusion-v1-5",
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32
+    )
+    sd_pipe = sd_pipe.to(device)
+    
+    if device == "cpu":
+        sd_pipe.enable_attention_slicing()
+    
+    # 生成基础图像
+    base_image = sd_pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=50,
+        guidance_scale=7.5,
+        width=512,
+        height=512
+    ).images[0]
+    
+    # 保存到临时文件（CLIPasso需要文件路径）
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+        temp_image_path = temp_file.name
+        base_image.save(temp_image_path)
+    
+    print(f"基础图像已生成并保存到临时文件: {temp_image_path}")
+    
+    try:
+        # 第二步：用CLIPasso生成素描（按照example中的格式调用）
+        print("第二步 - 使用CLIPasso生成素描...")
+        
+        sketch_result = generate_sketch(
+            target_file=temp_image_path,  # 临时图像文件路径
+            num_strokes=num_strokes,      # 笔画数量
+            num_iter=num_iter,           # 迭代次数
+            fix_scale=fix_scale,         # 固定缩放
+            mask_object=mask_object,     # 遮罩背景
+            num_sketches=num_sketches,   # 生成素描数量
+            use_gpu=use_gpu,            # GPU使用
+            output_dir=output_dir,       # 输出目录
+            clipasso_path=clipasso_path, # CLIPasso路径
+            multiprocess=multiprocess    # 多进程
+        )
+        
+        # 处理结果
+        if sketch_result["success"]:
+            print("文生图流程完成！")
+            
+            # 生成最终结果
+            result = {
+                "success": True,
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "base_image_temp_path": temp_image_path,
+                "output_dir": sketch_result["output_dir"],
+                "best_sketch_path": sketch_result["best_sketch_path"],
+                "all_sketches": sketch_result["all_sketches"],
+                "losses": sketch_result["losses"],
+                "sketch_result": sketch_result
+            }
+            
+            return result
+        else:
+            return {
+                "success": False,
+                "error": f"CLIPasso生成失败: {sketch_result.get('error', '未知错误')}",
+                "prompt": prompt
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"生成过程中出错: {str(e)}",
+            "prompt": prompt
+        }
+    
+    finally:
+        # 清理临时文件
+        try:
+            if os.path.exists(temp_image_path):
+                os.unlink(temp_image_path)
+                print(f"临时文件已清理: {temp_image_path}")
+        except:
+            pass

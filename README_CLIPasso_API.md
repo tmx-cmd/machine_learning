@@ -14,7 +14,8 @@ E:\mllab\machine_learning\
 
 ## 功能特性
 
-- 🚀 **简单易用**: 单函数调用即可生成草图
+- 🚀 **简单易用**: 单函数调用即可生成草图或文生图
+- 🎨 **文生图**: 支持文本到图像生成（Stable Diffusion + CLIPasso）
 - ⚡ **灵活配置**: 支持所有CLIPasso参数定制
 - 🔄 **多进程支持**: 自动并行处理多个草图生成
 - 🎯 **智能选择**: 自动选择质量最好的草图
@@ -23,16 +24,21 @@ E:\mllab\machine_learning\
 ## 安装要求
 
 1. 确保CLIPasso-main文件夹位于同一目录下
-2. 安装必要的依赖（在CLIPasso-main目录中运行）：
+2. 安装必要的依赖：
    ```bash
+   # 基础CLIPasso依赖（在CLIPasso-main目录中运行）
    pip install -r requirements.txt
+
+   # 文生图功能额外依赖
+   pip install diffusers torch accelerate transformers
    ```
-3. 确保有足够的磁盘空间用于模型下载和输出
+3. 确保有足够的磁盘空间用于模型下载和输出（Stable Diffusion模型约4GB）
 
 ## 快速开始
 
 ### 基本用法
 
+#### 图生图（图像到素描）
 ```python
 from clipasso_api import generate_sketch
 
@@ -44,6 +50,21 @@ result = generate_sketch(
 
 if result["success"]:
     print(f"草图生成成功: {result['best_sketch_path']}")
+```
+
+#### 文生图（文本到素描）
+```python
+from clipasso_api import text_to_image
+
+result = text_to_image(
+    prompt="一只可爱的小猫在花园里玩耍",
+    negative_prompt="模糊，低质量",
+    num_strokes=32,
+    num_iter=1500
+)
+
+if result["success"]:
+    print(f"素描生成成功: {result['best_sketch_path']}")
 ```
 
 ### 高级用法
@@ -62,6 +83,44 @@ result = generate_sketch(
 ```
 
 ## API参考
+
+### `text_to_image()` 函数
+
+文生图函数：先用Stable Diffusion生成图像，再用CLIPasso生成素描。
+
+#### 参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `prompt` | str | 必需 | 正向文本提示词 |
+| `negative_prompt` | str | "" | 负向提示词 |
+| `output_dir` | str | "./generated_images" | 输出目录 |
+| `filename` | str | None | 输出文件名（None=自动生成） |
+| `num_strokes` | int | 16 | 素描笔画数量 |
+| `num_iter` | int | 2001 | CLIPasso迭代次数 |
+| `fix_scale` | int | 0 | 是否固定缩放非正方形图片 |
+| `mask_object` | int | 0 | 是否遮罩背景 |
+| `num_sketches` | int | 3 | 生成素描数量 |
+| `use_gpu` | bool | None | 是否使用GPU（None=自动检测） |
+| `clipasso_path` | str | None | CLIPasso-main路径（None=自动检测） |
+| `multiprocess` | bool | True | 是否使用多进程 |
+
+#### 返回值
+
+```python
+{
+    "success": bool,           # 是否成功
+    "prompt": str,             # 使用的提示词
+    "negative_prompt": str,    # 使用的负向提示词
+    "base_image_temp_path": str, # 临时基础图像路径
+    "output_dir": str,         # 输出目录路径
+    "best_sketch_path": str,   # 最佳素描文件路径
+    "all_sketches": list,      # 所有生成的素描路径列表
+    "losses": dict,           # 各素描的损失值字典
+    "sketch_result": dict,    # 完整的CLIPasso结果
+    "error": str              # 错误信息（如果有）
+}
+```
 
 ### `generate_sketch()` 函数
 
@@ -95,7 +154,35 @@ result = generate_sketch(
 
 ## 使用示例
 
-### 1. 基本单图处理
+### 1. 文生图基础用法
+
+```python
+from clipasso_api import text_to_image
+
+result = text_to_image(
+    prompt="一只可爱的小猫",
+    negative_prompt="模糊，低质量，变形"
+)
+if result["success"]:
+    print(f"素描生成成功: {result['best_sketch_path']}")
+```
+
+### 2. 文生图高级用法
+
+```python
+result = text_to_image(
+    prompt="美丽的山水画风格风景",
+    negative_prompt="现代建筑，城市，人物",
+    num_strokes=48,        # 更多笔画 = 更精细
+    num_iter=2001,         # 完整迭代次数
+    fix_scale=1,           # 固定缩放
+    mask_object=0,         # 不遮罩背景
+    num_sketches=2,        # 生成2个素描
+    output_dir="./my_art"  # 自定义输出目录
+)
+```
+
+### 3. 图生图基础用法
 
 ```python
 from clipasso_api import generate_sketch
@@ -157,6 +244,14 @@ output_directory/
 4. **生成失败**
    - 检查目标图片是否存在且为有效格式
    - 确认有足够磁盘空间
+
+5. **文生图功能无法使用**
+   - 确认已安装diffusers: `pip install diffusers torch accelerate`
+   - 检查网络连接（首次运行需要下载Stable Diffusion模型）
+
+6. **Stable Diffusion模型下载慢**
+   - 使用镜像源或VPN加速下载
+   - 模型大小约4GB，下载时间较长
 
 ### 调试模式
 
