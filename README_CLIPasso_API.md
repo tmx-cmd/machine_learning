@@ -271,3 +271,5 @@ logging.basicConfig(level=logging.DEBUG)
 ## 许可证
 
 遵循原始CLIPasso项目的许可证。
+
+

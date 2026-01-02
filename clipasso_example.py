@@ -1,79 +1,61 @@
 """
-CLIPasso API Usage Examples
-
-This file demonstrates how to use the CLIPasso API wrapper.
+CLIPasso Multimodal Example (No External Dependencies)
+Relies on pure prompt engineering for white background sketch generation.
 """
 
-from clipasso_api import generate_sketch
+from clipasso_api import text_to_image
 import os
+import time
 
-def example_advanced_usage():
-    """Advanced usage with custom parameters"""
-    print("\n=== Advanced Usage Example ===")
-
-    #记得修改路径
-    target_image = r"E:\mllab\machine_learning\CLIPasso-main\CLIPasso-main\target_images\rose.jpeg"
-    output_dir = r"E:\mllab\machine_learning\test_output"
-
-    # Alternative: Use relative path (API will auto-resolve)
-    # target_image = "target_images/rose.jpeg"  # API will find this in CLIPasso directory
-
-    if not os.path.exists(target_image):
-        print(f"Warning: {target_image} does not exist. Please update the path.")
-        return
-
-    result = generate_sketch(
-        target_file=target_image,
-        num_strokes=32,        # More strokes = more detailed sketch
-        num_iter=2001,         # Full iterations
-        fix_scale=1,           # Fix scale for non-square images
-        mask_object=1,         # Mask background
-        num_sketches=1,        # Generate 3 sketches
-        use_gpu=True,          # Force GPU usage
-        output_dir=output_dir,
-        multiprocess=True      # Use multiprocessing
-    )
-
-    if result["success"]:
-        print("✓ Advanced sketch generated successfully!")
-        print(f"  Best sketch: {result['best_sketch_path']}")
-        print(f"  Number of sketches generated: {len(result['all_sketches'])}")
-    else:
-        print(f"✗ Error: {result.get('error', 'Unknown error')}")
-
-
-def example_text_to_image():
-    """文生图示例"""
-    print("\n=== 文生图示例 ===")
+def run_experiment(prompt, complexity, style, output_subdir):
+    """Helper function to run a single experiment"""
+    # 请确保这是你想要的输出路径
+    base_output_dir = r"E:\mllab\machine_learning\final_project_output_prompts_only"
+    output_dir = os.path.join(base_output_dir, output_subdir)
     
-    output_dir = r"E:\mllab\machine_learning\test_text_to_image"
+    print(f"\n--- Starting Experiment: Style=[{style}], Complexity=[{complexity}] ---")
+    print(f"Prompt: {prompt}")
     
+    start_time = time.time()
     result = text_to_image(
-        prompt="一只可爱的小猫在花园里玩耍，阳光明媚",
-        negative_prompt="模糊，低质量，变形",
-        num_strokes=32,        # 更多笔画 = 更精细
-        num_iter=2001,         # 完整迭代次数
-        fix_scale=1,           # 固定缩放非正方形图片
-        mask_object=1,         # 遮罩背景
-        num_sketches=1,        # 生成1个素描
-        use_gpu=True,          # 强制使用GPU
+        prompt=prompt,
+        complexity=complexity,
+        style=style,
         output_dir=output_dir,
-        multiprocess=False     # 单进程
+        multiprocess=False
     )
+    end_time = time.time()
     
     if result["success"]:
-        print("✓ 文生图成功！")
-        print(f"  输出目录: {result['output_dir']}")
-        print(f"  最佳素描: {result['best_sketch_path']}")
-        print(f"  生成的素描数量: {len(result['all_sketches'])}")
+        print(f"✓ Success! (Time: {end_time - start_time:.2f}s)")
+        print(f"  [Base Image]:  {result['base_image_path']}")
+        print(f"  [Final Sketch]: {result['best_sketch_path']}")
+        print("-" * 60)
     else:
-        print(f"✗ 生成失败: {result.get('error', '未知错误')}")
+        print(f"✗ Failed: {result.get('error')}")
 
-# 在main函数中调用
 if __name__ == "__main__":
-    # 运行现有示例
-    example_advanced_usage()
-    
-    # 运行文生图示例
-    example_text_to_image()
+    # 实验 1: 猫 (高复杂度，写实风格)
+    # 我们通过 Prompt 强制要求 "isolated on solid white background"
+    run_experiment(
+        prompt="A full body shot of a cute fluffy white persian cat sitting, looking at camera",
+        complexity="high",
+        style="realistic", 
+        output_subdir="exp1_cat_pure_prompt"
+    )
 
+    # 实验 2: 动漫风格 (中复杂度)
+    run_experiment(
+        prompt="A magical warrior girl with a sword",
+        complexity="medium",
+        style="anime",
+        output_subdir="exp2_anime_pure_prompt"
+    )
+
+    # 实验 3: 简单图标 (低复杂度)
+    run_experiment(
+        prompt="An icon of a coffee cup",
+        complexity="low",
+        style="default",
+        output_subdir="exp3_icon_pure_prompt"
+    )

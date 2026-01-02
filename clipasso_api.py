@@ -1,18 +1,6 @@
 """
-CLIPasso API Wrapper
-
-This module provides an API-like interface for CLIPasso object sketching functionality.
-It wraps the CLIPasso-main/run_object_sketching.py script into a callable function.
-
-Usage:
-    from clipasso_api import generate_sketch
-
-    result = generate_sketch(
-        target_file="path/to/image.jpg",
-        num_strokes=16,
-        num_iter=2001,
-        output_dir="path/to/output"
-    )
+CLIPasso API Wrapper (Pure Prompt Version)
+Removes rembg dependency. Relies solely on Prompt Engineering for white background.
 """
 
 import os
@@ -31,7 +19,7 @@ import warnings
 
 # 导入文生图相关库
 try:
-    from diffusers import StableDiffusionPipeline
+    from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
     DIFFUSERS_AVAILABLE = True
 except ImportError:
     DIFFUSERS_AVAILABLE = False
@@ -59,25 +47,11 @@ class CLIPassoConfig:
 
 def run_sketch_generation(seed, wandb_name, target_path, output_dir_path,
                          shared_losses, args_config, use_gpu_flag, clipasso_path):
-    """
-    Run sketch generation for a single seed.
-
-    Args:
-        seed: Random seed for this generation
-        wandb_name: Name for this run
-        target_path: Path to target image
-        output_dir_path: Output directory path
-        shared_losses: Shared dictionary for storing losses
-        args_config: CLIPassoConfig object with parameters
-        use_gpu_flag: Whether to use GPU
-        clipasso_path: Path to CLIPasso-main directory
-    """
-    # Change to CLIPasso directory
+    """Run sketch generation for a single seed."""
     original_cwd = os.getcwd()
     os.chdir(clipasso_path)
 
     try:
-        # Build command
         cmd = [
             "python", "painterly_rendering.py", target_path,
             "--num_paths", str(args_config.num_strokes),
@@ -95,134 +69,66 @@ def run_sketch_generation(seed, wandb_name, target_path, output_dir_path,
         ]
 
         # Run subprocess
-        exit_code = sp.run(cmd)
+        sp.run(cmd, check=True, capture_output=True)
 
-        if exit_code.returncode != 0:
-            print(f"Error in subprocess for seed {seed}")
-            return
-
-        # Read generated config to calculate loss
         try:
             config_path = f"{output_dir_path}/{wandb_name}/config.npy"
             if os.path.exists(config_path):
                 config = np.load(config_path, allow_pickle=True)[()]
                 loss_eval = np.array(config['loss_eval'])
                 inds = np.argsort(loss_eval)
-                # Store result in shared dictionary
                 shared_losses[wandb_name] = loss_eval[inds][0]
-            else:
-                print(f"Config file not found: {config_path}")
         except Exception as e:
             print(f"Error reading config for {wandb_name}: {e}")
 
+    except sp.CalledProcessError as e:
+        print(f"Error in CLIPasso subprocess for seed {seed}: {e.stderr.decode()}")
     finally:
-        # Restore original working directory
         os.chdir(original_cwd)
 
 def download_model_if_needed(clipasso_path):
-    """
-    Download the U2Net model if it doesn't exist.
-
-    Args:
-        clipasso_path: Path to CLIPasso-main directory
-    """
+    """Download the U2Net model if it doesn't exist."""
     model_path = f"{clipasso_path}/U2Net_/saved_models/u2net.pth"
 
     if not os.path.isfile(model_path):
         print(f"Downloading model to {model_path}...")
-        # Ensure directory exists
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
-
-        # Try to download the model
         try:
-            sp.run(["gdown", "https://drive.google.com/uc?id=1ao1ovG1Qtx4b7EoskHXmi2E9rp5CHLcZ",
-                    "-O", "U2Net_/saved_models/u2net.pth"], shell=True, cwd=clipasso_path)
+            sp.run(["curl", "-L", "-o", "U2Net_/saved_models/u2net.pth", 
+                    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.pth"], 
+                   cwd=clipasso_path, check=True)
         except Exception as e:
-            print(f"Download failed: {e}. Please manually download u2net.pth to {model_path}")
+            print(f"Download failed: {e}. Please manually download u2net.pth")
             return False
     return True
 
 def generate_sketch(target_file, num_strokes=16, num_iter=2001, fix_scale=0,
-                   mask_object=0, num_sketches=3, use_gpu=None, output_dir=None,
-                   clipasso_path=None, multiprocess=True):
-    """
-    Generate sketches from target image using CLIPasso.
-
-    Args:
-        target_file (str): Path to target image file
-        num_strokes (int): Number of strokes used to generate the sketch (default: 16)
-        num_iter (int): Number of iterations (default: 2001)
-        fix_scale (int): Fix scale if target image is not squared (default: 0)
-        mask_object (int): Mask background if target image contains background (default: 0)
-        num_sketches (int): Number of sketches to generate and choose from (default: 3)
-        use_gpu (bool): Whether to use GPU. If None, auto-detect (default: None)
-        output_dir (str): Output directory. If None, auto-generate (default: None)
-        clipasso_path (str): Path to CLIPasso-main directory. If None, auto-detect (default: None)
-        multiprocess (bool): Whether to use multiprocessing (default: True)
-
-    Returns:
-        dict: Result containing:
-            - success (bool): Whether generation was successful
-            - output_dir (str): Output directory path
-            - best_sketch_path (str): Path to best sketch file
-            - all_sketches (list): List of all generated sketch paths
-            - losses (dict): Dictionary of losses for each sketch
-    """
-
+                   mask_object=1, num_sketches=1, use_gpu=None, output_dir=None,
+                   clipasso_path=None, multiprocess=False):
+    """Generate sketches from target image using CLIPasso."""
+    
     # Auto-detect CLIPasso path
     if clipasso_path is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         clipasso_path = os.path.join(current_dir, "CLIPasso-main", "CLIPasso-main")
         if not os.path.exists(clipasso_path):
-            # Try alternative path
             clipasso_path = os.path.join(current_dir, "CLIPasso-main")
             if not os.path.exists(clipasso_path):
-                return {
-                    "success": False,
-                    "error": f"CLIPasso path not found. Expected at {clipasso_path}"
-                }
+                return {"success": False, "error": f"CLIPasso path not found."}
 
-    # Handle relative paths - if target_file is relative and doesn't exist in current dir,
-    # try to find it relative to clipasso_path
-    if not os.path.isabs(target_file) and not os.path.isfile(target_file):
-        # Try relative to clipasso_path
-        alt_target_file = os.path.join(clipasso_path, target_file)
-        if os.path.isfile(alt_target_file):
-            target_file = alt_target_file
-        else:
-            # Try relative to clipasso_path/target_images
-            alt_target_file2 = os.path.join(clipasso_path, "target_images", os.path.basename(target_file))
-            if os.path.isfile(alt_target_file2):
-                target_file = alt_target_file2
-            else:
-                return {
-                    "success": False,
-                    "error": f"Target file does not exist: {target_file} (tried absolute path, relative to CLIPasso dir, and target_images dir)"
-                }
+    # Handle relative paths
+    if not os.path.isabs(target_file):
+        target_file = os.path.abspath(target_file)
 
-    # Final check if target file exists
     if not os.path.isfile(target_file):
-        return {
-            "success": False,
-            "error": f"Target file does not exist: {target_file}"
-        }
+        return {"success": False, "error": f"Target file does not exist: {target_file}"}
 
-    # Download model if needed
     if not download_model_if_needed(clipasso_path):
-        return {
-            "success": False,
-            "error": "Failed to download required model"
-        }
+        return {"success": False, "error": "Failed to download required model"}
 
-    # Auto-detect GPU usage
     if use_gpu is None:
         use_gpu = torch.cuda.is_available()
 
-    if not torch.cuda.is_available() and use_gpu:
-        use_gpu = False
-        print("CUDA is not configured with GPU, running with CPU instead.")
-
-    # Generate output directory
     if output_dir is None:
         target_name = os.path.splitext(os.path.basename(target_file))[0]
         output_dir = f"{clipasso_path}/output_sketches/{target_name}/"
@@ -230,201 +136,173 @@ def generate_sketch(target_file, num_strokes=16, num_iter=2001, fix_scale=0,
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # Create config object
     config = CLIPassoConfig(
-        num_strokes=num_strokes,
-        num_iter=num_iter,
-        fix_scale=fix_scale,
-        mask_object=mask_object,
-        num_sketches=num_sketches,
+        num_strokes=num_strokes, num_iter=num_iter, fix_scale=fix_scale,
+        mask_object=mask_object, num_sketches=num_sketches,
         multiprocess=int(multiprocess and num_sketches > 1)
     )
 
-    # Initialize multiprocessing manager
     manager = mp.Manager()
     losses_all = manager.dict()
-
-    # Generate seeds
     seeds = list(range(0, num_sketches * 1000, 1000))
 
-    # Run sketch generation
     if multiprocess and num_sketches > 1:
-        ncpus = min(10, mp.cpu_count())
-        print(f"Starting multiprocessing pool with {ncpus} CPUs...")
+        ncpus = min(4, mp.cpu_count())
         P = mp.Pool(ncpus)
-
-        # Launch tasks
         for seed in seeds:
-            wandb_name = f"{os.path.splitext(os.path.basename(target_file))[0]}_{num_strokes}strokes_seed{seed}"
-            print(f"Launching task: {wandb_name}")
-
+            wandb_name = f"sketch_{num_strokes}str_{seed}"
             P.apply_async(run_sketch_generation, args=(
                 seed, wandb_name, target_file, output_dir, losses_all, config, use_gpu, clipasso_path
             ))
-
         P.close()
-        P.join()  # Wait for all subprocesses to finish
+        P.join()
     else:
-        # Single process execution
         for seed in seeds:
-            wandb_name = f"{os.path.splitext(os.path.basename(target_file))[0]}_{num_strokes}strokes_seed{seed}"
-            print(f"Processing: {wandb_name}")
-
+            wandb_name = f"sketch_{num_strokes}str_{seed}"
             run_sketch_generation(
                 seed, wandb_name, target_file, output_dir, losses_all, config, use_gpu, clipasso_path
             )
 
-    # Select best sketch
     result = {
-        "success": True,
-        "output_dir": output_dir,
-        "best_sketch_path": None,
-        "all_sketches": [],
-        "losses": dict(losses_all)
+        "success": True, "output_dir": output_dir,
+        "best_sketch_path": None, "all_sketches": [], "losses": dict(losses_all)
     }
 
     if len(losses_all) > 0:
         sorted_final = dict(sorted(losses_all.items(), key=lambda item: item[1]))
         best_name = list(sorted_final.keys())[0]
-
         src_file = f"{output_dir}/{best_name}/best_iter.svg"
-        dst_file = f"{output_dir}/{best_name}_best.svg"
-
+        timestamp = datetime.now().strftime("%H%M%S")
+        dst_file = f"{output_dir}/best_sketch_{timestamp}.svg"
+        
         if os.path.exists(src_file):
             copyfile(src_file, dst_file)
             result["best_sketch_path"] = dst_file
-            print(f"Best sketch saved to: {dst_file}")
-        else:
-            print("Best sketch file not found (generation may have failed).")
-
-        # Collect all sketch paths
+        
         for name in losses_all.keys():
             sketch_path = f"{output_dir}/{name}/best_iter.svg"
             if os.path.exists(sketch_path):
                 result["all_sketches"].append(sketch_path)
     else:
-        print("No results found. Check for errors above.")
         result["success"] = False
         result["error"] = "No sketches were generated successfully"
 
     return result
 
+def process_prompt_engineering(prompt, style="default"):
+    """
+    强化版 Prompt 工程：完全依赖提示词来保证白底和构图
+    """
+    # 核心增强：强制白底、无阴影、主体居中、完整
+    # 添加 "flat lighting" 和 "vector style" 有助于减少阴影
+    base_enhancer = ", centered shot, full body, isolated on solid white background, flat lighting, no shadows, clean edges, minimalist, vector style"
+    
+    styles = {
+        "default": base_enhancer,
+        "anime": base_enhancer + ", anime key visual, studio ghibli style, thick lineart, cel shaded, manga drawing",
+        "realistic": base_enhancer + ", highly detailed, realistic texture, sharp focus, 8k",
+        "scribble": base_enhancer + ", rough charcoal sketch style, messy lines, hand drawn on paper"
+    }
+    
+    enhanced_prompt = prompt + styles.get(style, base_enhancer)
+    return enhanced_prompt
+
 def text_to_image(prompt, negative_prompt="", output_dir="./generated_images",
-                 filename=None, num_strokes=16, num_iter=2001,
-                 fix_scale=0, mask_object=0, num_sketches=3, use_gpu=None,
-                 clipasso_path=None, multiprocess=True):
+                 complexity="medium", style="default",
+                 use_gpu=None, clipasso_path=None, multiprocess=False):
     """
-    文生图函数：先用Stable Diffusion生成图像，再用CLIPasso生成素描
-
-    Args:
-        prompt (str): 正向提示词
-        negative_prompt (str): 负向提示词
-        output_dir (str): 输出目录
-        filename (str): 输出文件名（不含扩展名）
-        num_strokes, num_iter, fix_scale, mask_object, num_sketches: CLIPasso参数
-        use_gpu (bool): 是否使用GPU
-        clipasso_path (str): CLIPasso路径
-        multiprocess (bool): 是否多进程
-
-    Returns:
-        dict: 包含生成结果的字典
+    改进后的文生图流程 (无 rembg 依赖版)
     """
 
-    # 检查diffusers是否可用
+    # 1. 参数映射
+    complexity_map = {
+        "low": {"strokes": 16, "iter": 1500},
+        "medium": {"strokes": 32, "iter": 1800},
+        "high": {"strokes": 48, "iter": 2200}
+    }
+    params = complexity_map.get(complexity, complexity_map["medium"])
+    num_strokes = params["strokes"]
+    num_iter = params["iter"]
+
     if not DIFFUSERS_AVAILABLE:
-        return {
-            "success": False,
-            "error": "diffusers库不可用，请安装: pip install diffusers torch"
-        }
+        return {"success": False, "error": "diffusers library unavailable"}
     
-    # 创建输出目录
     Path(output_dir).mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # 第一步：用Stable Diffusion生成基础图像
+    # 2. 生成基础图像 (Stable Diffusion)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"第一步 - 使用 {device} 生成基础图像...")
+    print(f"\n[Stage 1] Generating base image | Style: {style} | Complexity: {complexity}")
     
-    # 加载Stable Diffusion模型
+    # Prompt 增强
+    enhanced_prompt = process_prompt_engineering(prompt, style)
+    
+    # 负面 Prompt：这是不用 rembg 的关键。必须明确禁止阴影、复杂背景、裁剪
+    enhanced_negative = negative_prompt + ", shadow, drop shadow, cast shadow, dark background, complex background, grey background, gradient background, textured background, cropped, out of frame, cut off, partially visible, watermark, text, blurry, artifacts, deformed, ugly"
+
+    print(f"  > Enhanced Prompt: {enhanced_prompt}")
+
+    # 使用 DPM++ 采样器
+    scheduler = DPMSolverMultistepScheduler.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="scheduler")
     sd_pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32
+        scheduler=scheduler,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        safety_checker=None
     )
     sd_pipe = sd_pipe.to(device)
+    if device == "cpu": sd_pipe.enable_attention_slicing()
     
-    if device == "cpu":
-        sd_pipe.enable_attention_slicing()
-    
-    # 生成基础图像
+    # 生成图像
     base_image = sd_pipe(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        num_inference_steps=50,
-        guidance_scale=7.5,
-        width=512,
-        height=512
+        prompt=enhanced_prompt,
+        negative_prompt=enhanced_negative,
+        num_inference_steps=25,
+        guidance_scale=8.0, # 稍微提高相关性，强迫模型听从 "white background"
+        width=512, height=512
     ).images[0]
+
+    # 保存基础图像 (这是唯一的图像源了)
+    base_image_path = os.path.join(output_dir, f"base_sd_gen_{timestamp}.png")
+    base_image.save(base_image_path)
+    print(f"  > Base image saved: {base_image_path}")
     
-    # 保存到临时文件（CLIPasso需要文件路径）
+    # 保存到临时文件供 CLIPasso 使用
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
         temp_image_path = temp_file.name
         base_image.save(temp_image_path)
-    
-    print(f"基础图像已生成并保存到临时文件: {temp_image_path}")
-    
+
     try:
-        # 第二步：用CLIPasso生成素描（按照example中的格式调用）
-        print("第二步 - 使用CLIPasso生成素描...")
+        # 3. 生成素描 (CLIPasso)
+        print(f"[Stage 2] Running CLIPasso | Strokes: {num_strokes} | Iterations: {num_iter}")
         
         sketch_result = generate_sketch(
-            target_file=temp_image_path,  # 临时图像文件路径
-            num_strokes=num_strokes,      # 笔画数量
-            num_iter=num_iter,           # 迭代次数
-            fix_scale=fix_scale,         # 固定缩放
-            mask_object=mask_object,     # 遮罩背景
-            num_sketches=num_sketches,   # 生成素描数量
-            use_gpu=use_gpu,            # GPU使用
-            output_dir=output_dir,       # 输出目录
-            clipasso_path=clipasso_path, # CLIPasso路径
-            multiprocess=multiprocess    # 多进程
+            target_file=temp_image_path,
+            num_strokes=num_strokes,
+            num_iter=num_iter,
+            fix_scale=1,
+            mask_object=1, # 仍然开启 Mask，CLIPasso 内部会利用显著性检测
+            num_sketches=1,
+            use_gpu=use_gpu,
+            output_dir=output_dir,
+            clipasso_path=clipasso_path,
+            multiprocess=multiprocess
         )
         
-        # 处理结果
         if sketch_result["success"]:
-            print("文生图流程完成！")
-            
-            # 生成最终结果
-            result = {
+            print("✓ Multimodal pipeline completed successfully!")
+            return {
                 "success": True,
                 "prompt": prompt,
-                "negative_prompt": negative_prompt,
-                "base_image_temp_path": temp_image_path,
-                "output_dir": sketch_result["output_dir"],
-                "best_sketch_path": sketch_result["best_sketch_path"],
-                "all_sketches": sketch_result["all_sketches"],
-                "losses": sketch_result["losses"],
-                "sketch_result": sketch_result
+                "base_image_path": base_image_path,
+                "best_sketch_path": sketch_result["best_sketch_path"]
             }
-            
-            return result
         else:
-            return {
-                "success": False,
-                "error": f"CLIPasso生成失败: {sketch_result.get('error', '未知错误')}",
-                "prompt": prompt
-            }
+            return {"success": False, "error": sketch_result.get('error')}
             
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"生成过程中出错: {str(e)}",
-            "prompt": prompt
-        }
+        return {"success": False, "error": f"Pipeline error: {str(e)}"}
     
     finally:
-        # 清理临时文件
-        try:
-            if os.path.exists(temp_image_path):
-                os.unlink(temp_image_path)
-                print(f"临时文件已清理: {temp_image_path}")
-        except:
-            pass
+        try: os.unlink(temp_image_path)
+        except: pass
