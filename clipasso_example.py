@@ -43,42 +43,7 @@ def run_experiment(prompt, complexity, style, output_subdir):
     else:
         print(f"✗ Failed: {result.get('error')}")
 
-if __name__ == "__main__":
-    import sys
 
-    # 检查命令行参数，决定运行哪个实验
-    if len(sys.argv) > 1 and sys.argv[1] == "ablation":
-        # 运行消融实验
-        ablation_study()
-    else:
-        # 运行原始实验
-        print("运行原始实验系列...")
-        print("如需运行消融实验，请使用: python clipasso_example.py ablation")
-
-        # 实验 1: 猫 (高复杂度，写实风格)
-        # 我们通过 Prompt 强制要求 "isolated on solid white background"
-        run_experiment(
-            prompt="A full body shot of a cute fluffy white persian cat sitting, looking at camera",
-            complexity="high",
-            style="realistic",
-            output_subdir="exp1_cat_pure_prompt"
-        )
-
-        # 实验 2: 动漫风格 (中复杂度)
-        run_experiment(
-            prompt="A magical warrior girl with a sword",
-            complexity="medium",
-            style="anime",
-            output_subdir="exp2_anime_pure_prompt"
-        )
-
-        # 实验 3: 简单图标 (低复杂度)
-        run_experiment(
-            prompt="An icon of a coffee cup",
-            complexity="low",
-            style="default",
-            output_subdir="exp3_icon_pure_prompt"
-        )
 
 def ablation_study():
     """
@@ -96,7 +61,7 @@ def ablation_study():
         return
 
     # 配置实验参数
-    base_prompt = "一只可爱的小猫"
+    base_prompt = "a small cute cat"
     output_base_dir = r"E:\mllab\machine_learning\ablation_study"
 
     # 确保输出目录存在
@@ -160,8 +125,7 @@ def ablation_study():
         prompt=base_prompt,  # 只使用基础提示词
         negative_prompt="",  # 不使用负向提示词
         output_dir=group2_dir,
-        num_strokes=16,      # 基础笔画数
-        num_iter=1000,       # 基础迭代次数
+        complexity="low",    # 基础复杂度设置
         use_gpu=True,
         multiprocess=False
     )
@@ -182,8 +146,8 @@ def ablation_study():
 
     # 使用精心设计的prompt工程
     engineered_prompt = (
-        f"{base_prompt}，写实风格，高清细节，"
-        "白色背景，干净简洁，专业插画，高质量，"
+        f"{base_prompt}, realistic style, high detail, "
+        "white background, clean and simple, professional illustration, high quality, "
         "sharp focus, highly detailed, professional illustration"
     )
 
@@ -200,10 +164,7 @@ def ablation_study():
         prompt=engineered_prompt,
         negative_prompt=engineered_negative,
         output_dir=group3_dir,
-        num_strokes=32,      # 更多笔画
-        num_iter=2001,       # 更多迭代
-        fix_scale=1,         # 固定比例
-        mask_object=1,       # 遮罩背景
+        complexity="high",   # 高复杂度设置
         use_gpu=True,
         multiprocess=False
     )
@@ -251,3 +212,40 @@ def ablation_study():
 # # 方法2: 在Python代码中调用
 # from clipasso_example import ablation_study
 # ablation_study()
+
+if __name__ == "__main__":
+    import sys
+
+    # 检查命令行参数，决定运行哪个实验
+    if len(sys.argv) > 1 and sys.argv[1] == "ablation":
+        # 运行消融实验
+        ablation_study()
+    else:
+        # 运行原始实验
+        print("运行原始实验系列...")
+        print("如需运行消融实验，请使用: python clipasso_example.py ablation")
+
+        # 实验 1: 猫 (高复杂度，写实风格)
+        # 我们通过 Prompt 强制要求 "isolated on solid white background"
+        run_experiment(
+            prompt="A full body shot of a cute fluffy white persian cat sitting, looking at camera",
+            complexity="high",
+            style="realistic",
+            output_subdir="exp1_cat_pure_prompt"
+        )
+
+        # 实验 2: 动漫风格 (中复杂度)
+        run_experiment(
+            prompt="A magical warrior girl with a sword",
+            complexity="medium",
+            style="anime",
+            output_subdir="exp2_anime_pure_prompt"
+        )
+
+        # 实验 3: 简单图标 (低复杂度)
+        run_experiment(
+            prompt="An icon of a coffee cup",
+            complexity="low",
+            style="default",
+            output_subdir="exp3_icon_pure_prompt"
+        )
