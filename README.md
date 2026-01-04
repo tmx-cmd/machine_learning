@@ -157,13 +157,6 @@ run_benchmark_evaluation()
    - 大模型质量评分
    - 自动化报告生成
 
-## 🎨 示例结果
-
-| 提示词 | 复杂度 | 风格 | 生成结果 |
-|--------|--------|------|----------|
-| "咖啡杯图标" | low | default | ![Coffee Cup](examples/coffee_icon.svg) |
-| "可爱小猫" | medium | realistic | ![Cat](examples/cat_realistic.svg) |
-| "魔法少女" | high | anime | ![Anime Girl](examples/anime_girl.svg) |
 
 ## 🔧 配置说明
 
@@ -184,25 +177,7 @@ run_benchmark_evaluation()
 - **多进程**: 支持并发生成多个素描
 - **内存优化**: 自动启用attention slicing降低显存占用
 
-## 🧪 实验结果
 
-### 消融实验对比
-
-| 方法 | 质量评分 | 生成时间 | 稳定性 |
-|------|----------|----------|--------|
-| Stable Diffusion直接 | 7.2/10 | 30s | 高 |
-| CLIPasso无提示工程 | 6.8/10 | 180s | 中 |
-| CLIPasso有提示工程 | 8.5/10 | 240s | 高 |
-
-### 基准测试结果
-
-- **SketchBench-10平均分**: 8.3/10
-- **笔画数一致性**: 94.2%
-- **语义相似度**: 87.6%
-
-## 🤝 贡献指南
-
-欢迎提交Issues和Pull Requests！
 
 ### 开发环境设置
 ```bash
@@ -214,14 +189,7 @@ conda activate text2sketch
 pip install -r requirements-dev.txt
 ```
 
-### 代码规范
-- 遵循PEP 8风格指南
-- 添加类型注解
-- 编写单元测试
 
-## 📄 许可证
-
-本项目采用MIT许可证。详见[LICENSE](LICENSE)文件。
 
 ## 🙏 致谢
 
@@ -229,11 +197,7 @@ pip install -r requirements-dev.txt
 - [Stable Diffusion](https://github.com/CompVis/stable-diffusion) - 基础图像生成
 - [Hugging Face Diffusers](https://github.com/huggingface/diffusers) - 模型集成
 
-## 📞 联系方式
 
-- 项目主页: [GitHub Repository]
-- 问题反馈: [Issues]
-- 邮箱: your-email@example.com
 
 ---
 
